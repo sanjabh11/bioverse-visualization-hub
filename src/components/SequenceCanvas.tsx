@@ -1,20 +1,22 @@
 import { useEffect, useRef } from 'react';
-import { Canvas } from 'fabric';
+import { Canvas, Text } from 'fabric';
 
 export const SequenceCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fabricRef = useRef<Canvas | null>(null);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || fabricRef.current) return;
 
-    const fabricCanvas = new Canvas(canvasRef.current, {
+    // Initialize canvas only once
+    fabricRef.current = new Canvas(canvasRef.current, {
       width: 800,
       height: 200,
       backgroundColor: '#f8fafc',
     });
 
     // Add placeholder sequence visualization
-    const text = new Canvas.Text('ATCG...', {
+    const text = new Text('ATCG...', {
       left: 50,
       top: 50,
       fill: '#2C5282',
@@ -22,10 +24,13 @@ export const SequenceCanvas = () => {
       fontSize: 20,
     });
 
-    fabricCanvas.add(text);
+    fabricRef.current.add(text);
 
     return () => {
-      fabricCanvas.dispose();
+      if (fabricRef.current) {
+        fabricRef.current.dispose();
+        fabricRef.current = null;
+      }
     };
   }, []);
 
