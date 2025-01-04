@@ -15,14 +15,26 @@ const Index = () => {
 
   const predictStructure = async (sequence: string) => {
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${CONFIG.deepseekKey}`,
+        'Accept': 'application/json'
+      };
+
+      // First, make a preflight request to check API availability
+      const preflightResponse = await fetch(CONFIG.apiEndpoints.deepseek + '/protein/predict', {
+        method: 'OPTIONS',
+        headers
+      });
+
+      if (!preflightResponse.ok) {
+        console.warn('Preflight request failed:', preflightResponse.status);
+      }
+
+      // Make the actual prediction request
       const response = await fetch(`${CONFIG.apiEndpoints.deepseek}/protein/predict`, {
         method: 'POST',
-        mode: 'no-cors', // Add this to handle CORS
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${CONFIG.deepseekKey}`,
-          'Accept': 'application/json'
-        },
+        headers,
         body: JSON.stringify({ 
           sequence,
           model: 'deepseek-3',
@@ -30,14 +42,15 @@ const Index = () => {
         })
       });
 
-      // Since we're using no-cors, we need to handle the response differently
-      if (!response.ok && response.type !== 'opaque') {
-        throw new Error(`API Error: ${response.status}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error:', response.status, errorText);
+        throw new Error(`API Error: ${response.status} - ${errorText || 'Unknown error'}`);
       }
 
-      // With no-cors, we might not be able to parse the response
-      // We'll show a success message anyway
-      return { success: true };
+      const data = await response.json();
+      console.log('Prediction response:', data);
+      return data;
     } catch (error) {
       console.error('Structure prediction failed:', error);
       throw error;
@@ -49,7 +62,6 @@ const Index = () => {
       const response = await fetch(
         `${CONFIG.apiEndpoints.ncbi}/geo/query/acc.cgi?acc=${geoId}&api_key=${CONFIG.ncbiKey}`,
         {
-          mode: 'no-cors', // Add this to handle CORS
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json'
@@ -57,11 +69,12 @@ const Index = () => {
         }
       );
 
-      if (!response.ok && response.type !== 'opaque') {
+      if (!response.ok) {
         throw new Error(`API Error: ${response.status}`);
       }
 
-      return { success: true };
+      const data = await response.json();
+      return data;
     } catch (error) {
       console.error('GEO data fetch failed:', error);
       throw error;
@@ -70,32 +83,41 @@ const Index = () => {
 
   const handleSequenceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!sequence.trim()) {
+      toast.error("Please enter a protein sequence");
+      return;
+    }
+
     setIsLoading(true);
-    toast.success("Analysis started! This may take a few minutes.");
+    toast.info("Starting structure prediction...");
 
     try {
       const result = await predictStructure(sequence);
       console.log('Structure prediction result:', result);
-      toast.success("Structure prediction request sent successfully!");
-    } catch (error) {
+      toast.success("Structure prediction completed successfully!");
+    } catch (error: any) {
       console.error('Prediction error:', error);
-      toast.error("Failed to predict structure. Please try again.");
+      toast.error(error.message || "Failed to predict structure. Please try again.");
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleGeoSubmit = async () => {
-    if (!geoId) return;
+    if (!geoId) {
+      toast.error("Please enter a GEO accession ID");
+      return;
+    }
+
     setIsLoading(true);
     
     try {
       const data = await fetchGeoData(geoId);
       console.log('GEO data result:', data);
-      toast.success("Expression data request sent successfully!");
-    } catch (error) {
+      toast.success("Expression data fetched successfully!");
+    } catch (error: any) {
       console.error('GEO error:', error);
-      toast.error("Failed to fetch expression data. Please try again.");
+      toast.error(error.message || "Failed to fetch expression data. Please try again.");
     } finally {
       setIsLoading(false);
     }
