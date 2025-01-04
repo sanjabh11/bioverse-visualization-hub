@@ -4,11 +4,89 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { SequenceCanvas } from "@/components/SequenceCanvas";
 import { ExpressionPlot } from "@/components/ExpressionPlot";
+import { CONFIG } from "@/config/api";
+import { useState } from "react";
 
 const Index = () => {
-  const handleSequenceSubmit = (e: React.FormEvent) => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [sequence, setSequence] = useState("");
+  const [geoId, setGeoId] = useState("");
+
+  const predictStructure = async (sequence: string) => {
+    try {
+      const response = await fetch(`${CONFIG.apiEndpoints.deepseek}/protein/predict`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${CONFIG.deepseekKey}`
+        },
+        body: JSON.stringify({ sequence })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Structure prediction failed:', error);
+      throw error;
+    }
+  };
+
+  const fetchGeoData = async (geoId: string) => {
+    try {
+      const response = await fetch(
+        `${CONFIG.apiEndpoints.ncbi}/geo/query/acc.cgi?acc=${geoId}&api_key=${CONFIG.ncbiKey}`,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('GEO data fetch failed:', error);
+      throw error;
+    }
+  };
+
+  const handleSequenceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsLoading(true);
     toast.success("Analysis started! This may take a few minutes.");
+
+    try {
+      const result = await predictStructure(sequence);
+      // Update visualization with result
+      toast.success("Structure prediction completed!");
+    } catch (error) {
+      toast.error("Failed to predict structure. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGeoSubmit = async () => {
+    if (!geoId) return;
+    setIsLoading(true);
+    
+    try {
+      const data = await fetchGeoData(geoId);
+      // Update expression plot with data
+      toast.success("Expression data loaded successfully!");
+    } catch (error) {
+      toast.error("Failed to fetch expression data. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -30,9 +108,15 @@ const Index = () => {
             <Textarea 
               placeholder="Enter protein sequence..."
               className="font-mono"
+              value={sequence}
+              onChange={(e) => setSequence(e.target.value)}
             />
-            <Button type="submit" className="bg-bio-accent hover:bg-bio-accent/90">
-              Predict Structure
+            <Button 
+              type="submit" 
+              className="bg-bio-accent hover:bg-bio-accent/90"
+              disabled={isLoading}
+            >
+              {isLoading ? "Predicting..." : "Predict Structure"}
             </Button>
           </form>
           <div className="w-full h-[400px] bg-gray-50 rounded-lg border border-gray-200">
@@ -40,22 +124,30 @@ const Index = () => {
           </div>
         </section>
 
-        {/* Sequence Analysis Section */}
-        <section className="bg-white rounded-xl shadow-lg p-6 space-y-4">
-          <h2 className="text-2xl font-semibold text-bio-primary">Sequence Analysis</h2>
-          <SequenceCanvas />
-        </section>
-
         {/* Expression Data Section */}
         <section className="bg-white rounded-xl shadow-lg p-6 space-y-4">
           <h2 className="text-2xl font-semibold text-bio-primary">Expression Data</h2>
           <div className="flex gap-4 mb-4">
-            <Input placeholder="Enter GEO accession..." />
-            <Button className="bg-bio-secondary hover:bg-bio-secondary/90">
-              Fetch Data
+            <Input 
+              placeholder="Enter GEO accession..." 
+              value={geoId}
+              onChange={(e) => setGeoId(e.target.value)}
+            />
+            <Button 
+              className="bg-bio-secondary hover:bg-bio-secondary/90"
+              onClick={handleGeoSubmit}
+              disabled={isLoading}
+            >
+              {isLoading ? "Loading..." : "Fetch Data"}
             </Button>
           </div>
           <ExpressionPlot />
+        </section>
+
+        {/* Sequence Analysis Section */}
+        <section className="bg-white rounded-xl shadow-lg p-6 space-y-4">
+          <h2 className="text-2xl font-semibold text-bio-primary">Sequence Analysis</h2>
+          <SequenceCanvas />
         </section>
       </main>
     </div>
