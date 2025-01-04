@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { fabric } from 'fabric';
+import { Canvas } from 'fabric';
 
 export const SequenceCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -7,14 +7,14 @@ export const SequenceCanvas = () => {
   useEffect(() => {
     if (!canvasRef.current) return;
 
-    const fabricCanvas = new fabric.Canvas(canvasRef.current, {
+    const fabricCanvas = new Canvas(canvasRef.current, {
       width: 800,
       height: 200,
       backgroundColor: '#f8fafc',
     });
 
     // Add placeholder sequence visualization
-    const text = new fabric.Text('ATCG...', {
+    const text = new Canvas.Text('ATCG...', {
       left: 50,
       top: 50,
       fill: '#2C5282',
