@@ -1,10 +1,9 @@
-import { ProteinViewer } from "@/components/ProteinViewer";
-import { SequenceCanvas } from "@/components/SequenceCanvas";
-import { ExpressionPlot } from "@/components/ExpressionPlot";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { SequenceCanvas } from "@/components/SequenceCanvas";
+import { ExpressionPlot } from "@/components/ExpressionPlot";
 
 const Index = () => {
   const handleSequenceSubmit = (e: React.FormEvent) => {
@@ -36,7 +35,9 @@ const Index = () => {
               Predict Structure
             </Button>
           </form>
-          <ProteinViewer />
+          <div className="w-full h-[400px] bg-gray-50 rounded-lg border border-gray-200">
+            {/* MolStar viewer will be integrated here */}
+          </div>
         </section>
 
         {/* Sequence Analysis Section */}
