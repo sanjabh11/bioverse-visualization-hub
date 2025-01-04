@@ -19,13 +19,15 @@ export default {
     },
     extend: {
       colors: {
-        // Scientific color palette
+        border: "hsl(var(--border))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
         bio: {
-          primary: "#2C5282", // Deep blue
-          secondary: "#2B6CB0", // Medium blue
-          accent: "#4FD1C5", // Teal
-          light: "#EBF8FF", // Light blue
-          dark: "#1A365D", // Dark blue
+          primary: "#2C5282",
+          secondary: "#2B6CB0",
+          accent: "#4FD1C5",
+          light: "#EBF8FF",
+          dark: "#1A365D",
         },
       },
       keyframes: {
