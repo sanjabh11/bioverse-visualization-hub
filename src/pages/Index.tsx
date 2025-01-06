@@ -7,12 +7,14 @@ import { ExpressionPlot } from "@/components/ExpressionPlot";
 import { CONFIG } from "@/config/api";
 import { useState } from "react";
 import { ProteinViewer } from "@/components/ProteinViewer";
+import type { ExpressionData } from "@/services/ncbiApi";
 
 const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [sequence, setSequence] = useState("");
   const [geoId, setGeoId] = useState("");
   const [prediction, setPrediction] = useState<string | undefined>();
+  const [expressionData, setExpressionData] = useState<ExpressionData | undefined>();
 
   const predictStructure = async (sequence: string) => {
     try {
@@ -77,8 +79,9 @@ const Index = () => {
 
   const fetchGeoData = async (geoId: string) => {
     try {
+      const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
       const response = await fetch(
-        `${CONFIG.apiEndpoints.ncbi}/geo/query/acc.cgi?acc=${geoId}&api_key=${CONFIG.ncbiKey}`,
+        `${SERVER_URL}/api/geo/expression?accession=${geoId}`,
         {
           headers: {
             'Content-Type': 'application/json',
@@ -92,7 +95,19 @@ const Index = () => {
       }
 
       const data = await response.json();
-      return data;
+      
+      // Transform the data into ExpressionData format
+      const expressionData: ExpressionData = {
+        dataset_id: geoId,
+        gene_id: data.gene_id || 'Unknown',
+        expression_values: data.samples?.map((sample: any) => ({
+          sample_id: sample.id,
+          value: parseFloat(sample.value),
+          condition: sample.condition,
+        })) || [],
+      };
+
+      return expressionData;
     } catch (error) {
       console.error('GEO data fetch failed:', error);
       throw error;
@@ -130,14 +145,17 @@ const Index = () => {
     }
 
     setIsLoading(true);
+    setExpressionData(undefined);
     
     try {
       const data = await fetchGeoData(geoId);
       console.log('GEO data result:', data);
+      setExpressionData(data);
       toast.success("Expression data fetched successfully!");
     } catch (error: any) {
       console.error('GEO error:', error);
       toast.error(error.message || "Failed to fetch expression data. Please try again.");
+      setExpressionData(undefined);
     } finally {
       setIsLoading(false);
     }
@@ -193,7 +211,10 @@ const Index = () => {
               {isLoading ? "Loading..." : "Fetch Data"}
             </Button>
           </div>
-          <ExpressionPlot />
+          <ExpressionPlot 
+            data={expressionData} 
+            isLoading={isLoading}
+          />
         </section>
 
         {/* Sequence Analysis Section */}

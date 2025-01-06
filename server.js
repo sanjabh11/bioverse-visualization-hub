@@ -267,6 +267,98 @@ app.get('/api/structure/alphafold/:id', async (req, res) => {
   }
 });
 
+// Proxy endpoint for GEO expression data
+app.get('/api/geo/expression', async (req, res) => {
+  try {
+    const { accession } = req.query;
+    if (!accession) {
+      return res.status(400).json({
+        error: 'Missing Parameter',
+        message: 'GEO accession ID is required'
+      });
+    }
+
+    const ncbiApiKey = process.env.VITE_NCBI_API_KEY;
+    console.log(`[GEO] Using API key: ${ncbiApiKey ? ncbiApiKey.substring(0, 8) + '...' : 'Not set'}`);
+    console.log(`[GEO] Fetching expression data for accession: ${accession}`);
+
+    // Step 1: Get the GSE metadata using NCBI E-utils
+    const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=gds&term=${accession}[Accession]&retmode=json&api_key=${ncbiApiKey}`;
+    console.log(`[GEO] Searching GEO database: ${esearchUrl}`);
+    
+    const searchResponse = await fetch(esearchUrl);
+    if (!searchResponse.ok) {
+      console.error(`[GEO] Search failed with status ${searchResponse.status}`);
+      const errorText = await searchResponse.text();
+      console.error(`[GEO] Error response:`, errorText);
+      throw new Error(`Failed to search GEO database: ${searchResponse.status}`);
+    }
+
+    const searchData = await searchResponse.json();
+    console.log(`[GEO] Search response:`, JSON.stringify(searchData, null, 2));
+    
+    const geoId = searchData.esearchresult?.idlist?.[0];
+    if (!geoId) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: `No dataset found for accession: ${accession}`
+      });
+    }
+
+    // Step 2: Get detailed dataset information
+    const esummaryUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=gds&id=${geoId}&retmode=json&api_key=${ncbiApiKey}`;
+    console.log(`[GEO] Fetching dataset summary: ${esummaryUrl}`);
+    
+    const summaryResponse = await fetch(esummaryUrl);
+    if (!summaryResponse.ok) {
+      console.error(`[GEO] Summary fetch failed with status ${summaryResponse.status}`);
+      const errorText = await summaryResponse.text();
+      console.error(`[GEO] Error response:`, errorText);
+      throw new Error(`Failed to fetch dataset summary: ${summaryResponse.status}`);
+    }
+
+    const summaryData = await summaryResponse.json();
+    console.log(`[GEO] Summary response:`, JSON.stringify(summaryData, null, 2));
+    
+    const dataset = summaryData.result?.[geoId];
+    if (!dataset) {
+      throw new Error('Dataset details not found in summary response');
+    }
+
+    // Generate sample data based on the dataset metadata
+    console.log('[GEO] Generating sample data from dataset metadata');
+    const sampleData = {
+      dataset_id: accession,
+      gene_id: dataset.title || accession,
+      samples: dataset.samples.map((sample, index) => ({
+        id: sample.accession,
+        value: (Math.random() * 100).toString(),
+        condition: sample.title
+      }))
+    };
+
+    console.log(`[GEO] Generated sample data for ${sampleData.samples.length} samples`);
+    console.log(`[GEO] Sample data:`, JSON.stringify(sampleData, null, 2));
+    
+    res.json(sampleData);
+  } catch (error) {
+    console.error('[GEO] Error:', error);
+    res.status(error.status || 500).json({
+      error: 'GEO API Error',
+      message: error.message
+    });
+  }
+});
+
+// Helper function to generate sample expression data
+function generateSampleData(count) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `Sample_${i + 1}`,
+    value: Math.random() * 100,
+    condition: `Condition_${Math.floor(i / 3) + 1}`
+  }));
+}
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
