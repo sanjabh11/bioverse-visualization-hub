@@ -12,45 +12,63 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [sequence, setSequence] = useState("");
   const [geoId, setGeoId] = useState("");
+  const [prediction, setPrediction] = useState<string | undefined>();
 
   const predictStructure = async (sequence: string) => {
     try {
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${CONFIG.deepseekKey}`,
-        'Accept': 'application/json'
-      };
-
-      // First, make a preflight request to check API availability
-      const preflightResponse = await fetch(CONFIG.apiEndpoints.deepseek + '/protein/predict', {
-        method: 'OPTIONS',
-        headers
-      });
-
-      if (!preflightResponse.ok) {
-        console.warn('Preflight request failed:', preflightResponse.status);
+      const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
+      
+      // First check if the server is available
+      const healthCheck = await fetch(`${SERVER_URL}/health`).catch(() => null);
+      if (!healthCheck?.ok) {
+        throw new Error('Proxy server is not available. Please ensure the server is running.');
       }
 
-      // Make the actual prediction request
-      const response = await fetch(`${CONFIG.apiEndpoints.deepseek}/protein/predict`, {
+      console.log('Making prediction request to proxy server');
+      console.log('Sequence:', sequence);
+      
+      const response = await fetch(`${SERVER_URL}/api/protein/predict`, {
         method: 'POST',
-        headers,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({ 
           sequence,
-          model: 'deepseek-3',
-          streamResults: true
+          temperature: 0.7,
+          max_tokens: 4096
         })
       });
 
+      let errorData;
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('API Error:', response.status, errorText);
-        throw new Error(`API Error: ${response.status} - ${errorText || 'Unknown error'}`);
+        try {
+          errorData = await response.json();
+          console.error('API Error:', {
+            status: response.status,
+            error: errorData
+          });
+        } catch (e) {
+          const textError = await response.text();
+          console.error('API Error (text):', textError);
+          errorData = { message: textError };
+        }
+        throw new Error(errorData.message || `API error: ${response.status}`);
       }
 
       const data = await response.json();
       console.log('Prediction response:', data);
-      return data;
+      
+      // Extract the predicted structure from the chat completion response
+      const prediction = data.choices?.[0]?.message?.content;
+      if (!prediction) {
+        throw new Error('No prediction received from the API');
+      }
+
+      return {
+        prediction,
+        raw_response: data
+      };
     } catch (error) {
       console.error('Structure prediction failed:', error);
       throw error;
@@ -89,11 +107,13 @@ const Index = () => {
     }
 
     setIsLoading(true);
+    setPrediction(undefined);
     toast.info("Starting structure prediction...");
 
     try {
       const result = await predictStructure(sequence);
       console.log('Structure prediction result:', result);
+      setPrediction(result.prediction);
       toast.success("Structure prediction completed successfully!");
     } catch (error: any) {
       console.error('Prediction error:', error);
@@ -153,7 +173,7 @@ const Index = () => {
               {isLoading ? "Predicting..." : "Predict Structure"}
             </Button>
           </form>
-          <ProteinViewer />
+          <ProteinViewer structure={prediction} isLoading={isLoading} />
         </section>
 
         {/* Expression Data Section */}
