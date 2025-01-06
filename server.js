@@ -129,6 +129,144 @@ app.post('/api/protein/predict', async (req, res) => {
   }
 });
 
+// Proxy endpoint for fetching PDB structures
+app.get('/api/structure/pdb/:pdbId', async (req, res) => {
+  try {
+    const { pdbId } = req.params;
+    console.log(`[PDB] Fetching structure: ${pdbId}`);
+    
+    // Try PDBe first
+    console.log(`[PDB] Trying PDBe URL: https://www.ebi.ac.uk/pdbe/entry-files/download/${pdbId.toLowerCase()}.pdb`);
+    let response = await fetch(`https://www.ebi.ac.uk/pdbe/entry-files/download/${pdbId.toLowerCase()}.pdb`);
+    
+    // If PDBe fails, try RCSB
+    if (!response.ok) {
+      console.log(`[PDB] PDBe fetch failed (${response.status}), trying RCSB...`);
+      console.log(`[PDB] Trying RCSB URL: https://files.rcsb.org/download/${pdbId.toUpperCase()}.pdb`);
+      response = await fetch(`https://files.rcsb.org/download/${pdbId.toUpperCase()}.pdb`);
+    }
+    
+    if (!response.ok) {
+      console.error(`[PDB] All fetch attempts failed: ${response.status} - ${response.statusText}`);
+      throw new Error(`Failed to fetch PDB structure: ${response.status}`);
+    }
+    
+    const data = await response.text();
+    
+    // Validate PDB data
+    if (!data.includes('ATOM') && !data.includes('HETATM')) {
+      console.error(`[PDB] Invalid PDB data received for ${pdbId}`);
+      throw new Error('Invalid PDB data received');
+    }
+    
+    console.log(`[PDB] Successfully fetched structure: ${pdbId} (${data.length} bytes)`);
+    res.set('Content-Type', 'text/plain');
+    res.send(data);
+  } catch (error) {
+    console.error('[PDB] Structure fetch error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Proxy endpoint for fetching AlphaFold structures
+app.get('/api/structure/alphafold/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`[AlphaFold] Attempting to fetch structure for ID: ${id}`);
+    
+    // Try different URL patterns for AlphaFold
+    const urls = [
+      // Standard AlphaFold URLs
+      `https://alphafold.ebi.ac.uk/files/AF-${id}-F1-model_v4.pdb`,
+      `https://alphafold.ebi.ac.uk/files/AF-${id}-F1.pdb`,
+      // Try without AF- prefix if it's already included
+      id.startsWith('AF-') ? `https://alphafold.ebi.ac.uk/files/${id}.pdb` : null,
+      // Try with AF- prefix if not included
+      !id.startsWith('AF-') ? `https://alphafold.ebi.ac.uk/files/AF-${id}.pdb` : null,
+      // Direct file name
+      `https://alphafold.ebi.ac.uk/files/${id}.pdb`
+    ].filter(Boolean); // Remove null entries
+    
+    let data = null;
+    let successUrl = null;
+    let lastError = null;
+    
+    console.log(`[AlphaFold] Will try the following URLs:`, urls);
+    
+    for (const url of urls) {
+      console.log(`[AlphaFold] Trying URL: ${url}`);
+      try {
+        const response = await fetch(url);
+        if (response.ok) {
+          const text = await response.text();
+          // Validate PDB format
+          if (text.includes('ATOM') || text.includes('HETATM')) {
+            data = text;
+            successUrl = url;
+            console.log(`[AlphaFold] Successfully fetched valid PDB data from: ${url}`);
+            break;
+          } else {
+            console.log(`[AlphaFold] Response from ${url} was not valid PDB data`);
+            lastError = 'Invalid PDB data received';
+          }
+        } else {
+          console.log(`[AlphaFold] Failed to fetch from ${url}: ${response.status}`);
+          lastError = `HTTP ${response.status}: ${response.statusText}`;
+        }
+      } catch (error) {
+        console.log(`[AlphaFold] Error fetching from ${url}:`, error.message);
+        lastError = error.message;
+      }
+    }
+    
+    if (!data) {
+      // If AlphaFold fails, try PDB as fallback
+      console.log(`[AlphaFold] All AlphaFold URLs failed, trying PDB as fallback for ${id}`);
+      try {
+        // Try both with and without AF- prefix
+        const pdbId = id.startsWith('AF-') ? id.substring(3) : id;
+        const pdbUrls = [
+          `https://files.rcsb.org/download/${pdbId.toUpperCase()}.pdb`,
+          `https://www.ebi.ac.uk/pdbe/entry-files/download/${pdbId.toLowerCase()}.pdb`
+        ];
+        
+        for (const url of pdbUrls) {
+          console.log(`[AlphaFold] Trying PDB fallback URL: ${url}`);
+          const pdbResponse = await fetch(url);
+          if (pdbResponse.ok) {
+            const text = await pdbResponse.text();
+            if (text.includes('ATOM') || text.includes('HETATM')) {
+              data = text;
+              successUrl = `PDB:${url}`;
+              console.log(`[AlphaFold] Successfully fetched from PDB fallback: ${url}`);
+              break;
+            }
+          }
+        }
+      } catch (error) {
+        console.log(`[AlphaFold] PDB fallback error:`, error.message);
+        lastError = error.message;
+      }
+    }
+    
+    if (!data) {
+      const error = new Error(`Failed to fetch structure for ${id} from any source. Last error: ${lastError}`);
+      error.details = { lastError, triedUrls: urls };
+      throw error;
+    }
+    
+    console.log(`[AlphaFold] Successfully fetched structure: ${id} (${data.length} bytes) from ${successUrl}`);
+    res.set('Content-Type', 'text/plain');
+    res.send(data);
+  } catch (error) {
+    console.error('[AlphaFold] Structure fetch error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: error.details || {}
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
