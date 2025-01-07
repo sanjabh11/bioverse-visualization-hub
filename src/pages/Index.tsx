@@ -8,6 +8,8 @@ import { CONFIG } from "@/config/api";
 import { useState } from "react";
 import { ProteinViewer } from "@/components/ProteinViewer";
 import type { ExpressionData } from "@/services/ncbiApi";
+import { ArrayExpressViewer } from '@/components/ArrayExpressViewer';
+import { UniProtViewer } from '@/components/UniProtViewer';
 
 const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -194,9 +196,15 @@ const Index = () => {
           <ProteinViewer structure={prediction} isLoading={isLoading} />
         </section>
 
+        {/* UniProt Section */}
+        <section className="bg-white rounded-xl shadow-lg p-6 space-y-4">
+          <h2 className="text-2xl font-semibold text-bio-primary">UniProt Protein Information</h2>
+          <UniProtViewer />
+        </section>
+
         {/* Expression Data Section */}
         <section className="bg-white rounded-xl shadow-lg p-6 space-y-4">
-          <h2 className="text-2xl font-semibold text-bio-primary">Expression Data</h2>
+          <h2 className="text-2xl font-semibold text-bio-primary">GEO Expression Data</h2>
           <div className="flex gap-4 mb-4">
             <Input 
               placeholder="Enter GEO accession..." 
@@ -215,6 +223,12 @@ const Index = () => {
             data={expressionData} 
             isLoading={isLoading}
           />
+        </section>
+
+        {/* ArrayExpress Section */}
+        <section className="bg-white rounded-xl shadow-lg p-6 space-y-4">
+          <h2 className="text-2xl font-semibold text-bio-primary">ArrayExpress Data</h2>
+          <ArrayExpressViewer />
         </section>
 
         {/* Sequence Analysis Section */}

@@ -1,218 +1,172 @@
 import { z } from 'zod';
 
-// Type definitions
-export interface NCBIResponse<T> {
-  data: T;
-  status: number;
-  message?: string;
-}
-
-// Zod schemas for different NCBI responses
-const GEODatasetSchema = z.object({
+// GEO Data Types
+export const GEOSampleSchema = z.object({
+  id: z.string(),
   accession: z.string(),
   title: z.string(),
-  summary: z.string().optional(),
-  samples: z.array(z.object({
-    accession: z.string(),
-    title: z.string(),
-  })).optional(),
+  value: z.number(),
+  condition: z.string()
 });
 
-const ProteinSchema = z.object({
-  accession: z.string(),
-  sequence: z.string(),
-  length: z.number(),
-  organism: z.string(),
-  features: z.array(z.object({
-    type: z.string(),
-    location: z.string(),
-    description: z.string().optional(),
-  })).optional(),
-});
-
-const BlastResultSchema = z.object({
-  query: z.string(),
-  hits: z.array(z.object({
-    id: z.string(),
-    score: z.number(),
-    evalue: z.number(),
-    identity: z.number(),
-    alignments: z.array(z.object({
-      query_start: z.number(),
-      query_end: z.number(),
-      subject_start: z.number(),
-      subject_end: z.number(),
-      query_seq: z.string(),
-      subject_seq: z.string(),
-      midline: z.string(),
-    })),
-  })),
-});
-
-const ExpressionDataSchema = z.object({
+export const GEODatasetSchema = z.object({
   dataset_id: z.string(),
   gene_id: z.string(),
-  expression_values: z.array(z.object({
-    sample_id: z.string(),
-    value: z.number(),
-    condition: z.string().optional(),
-  })),
+  samples: z.array(GEOSampleSchema)
 });
 
+export type GEOSample = z.infer<typeof GEOSampleSchema>;
 export type GEODataset = z.infer<typeof GEODatasetSchema>;
-export type Protein = z.infer<typeof ProteinSchema>;
-export type BlastResult = z.infer<typeof BlastResultSchema>;
-export type ExpressionData = z.infer<typeof ExpressionDataSchema>;
 
-class NCBIApiError extends Error {
-  constructor(
-    message: string,
-    public status?: number,
-    public code?: string
-  ) {
-    super(message);
-    this.name = 'NCBIApiError';
-  }
+// Expression Data Type used by ExpressionPlot
+export interface ExpressionData {
+  dataset_id: string;
+  gene_id: string;
+  expression_values: Array<{
+    sample_id: string;
+    value: number;
+    condition?: string;
+  }>;
 }
 
-export class NCBIApiService {
-  private readonly apiKey: string;
-  private readonly baseUrl: string;
-  private readonly timeout: number;
-  private readonly retries: number;
+class NCBIApiService {
+  private apiKey: string;
+  private baseUrl: string;
+  private timeout: number;
+  private retries: number;
 
   constructor() {
     this.apiKey = import.meta.env.VITE_NCBI_API_KEY;
     this.baseUrl = import.meta.env.VITE_GEO_API_URL;
-    this.timeout = Number(import.meta.env.VITE_API_TIMEOUT) || 30000;
-    this.retries = Number(import.meta.env.VITE_API_RETRIES) || 3;
-
-    if (!this.apiKey) {
-      throw new Error('NCBI API key is not configured');
-    }
+    this.timeout = parseInt(import.meta.env.VITE_API_TIMEOUT || '30000');
+    this.retries = parseInt(import.meta.env.VITE_API_RETRIES || '3');
   }
 
-  private async fetchWithRetry<T>(
-    url: string,
-    options: RequestInit = {},
-    retryCount = 0
-  ): Promise<NCBIResponse<T>> {
+  private async fetchWithRetry(url: string, options: RequestInit = {}, retries = this.retries): Promise<Response> {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
       const response = await fetch(url, {
         ...options,
-        signal: controller.signal,
-        headers: {
-          'api-key': this.apiKey,
-          ...options.headers,
-        },
+        signal: AbortSignal.timeout(this.timeout)
       });
 
-      clearTimeout(timeoutId);
-
       if (!response.ok) {
-        throw new NCBIApiError(
-          `NCBI API error: ${response.statusText}`,
-          response.status
-        );
+        throw new Error(`API request failed with status ${response.status}`);
       }
 
-      const data = await response.json();
-      return { data, status: response.status };
+      return response;
     } catch (error) {
-      if (error instanceof NCBIApiError) {
-        throw error;
+      if (retries > 0) {
+        console.warn(`Retrying request to ${url}, ${retries} attempts remaining`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return this.fetchWithRetry(url, options, retries - 1);
       }
-
-      if (retryCount < this.retries) {
-        await new Promise(resolve => 
-          setTimeout(resolve, Math.pow(2, retryCount) * 1000)
-        );
-        return this.fetchWithRetry<T>(url, options, retryCount + 1);
-      }
-
-      throw new NCBIApiError(
-        error instanceof Error ? error.message : 'Unknown error occurred'
-      );
+      throw error;
     }
   }
 
-  async getGeoDataset(accession: string): Promise<NCBIResponse<GEODataset>> {
-    const url = new URL(`${this.baseUrl}/query/acc.cgi`);
-    url.searchParams.append('acc', accession);
-    url.searchParams.append('format', 'json');
+  async searchGeoDatasets(query: string): Promise<Array<{ accession: string; title: string }>> {
+    const url = `${this.baseUrl}/esearch.fcgi?db=gds&term=${encodeURIComponent(query)}&retmode=json&api_key=${this.apiKey}`;
+    const response = await this.fetchWithRetry(url);
+    const data = await response.json();
 
-    const response = await this.fetchWithRetry<GEODataset>(url.toString());
-    try {
-      GEODatasetSchema.parse(response.data);
-      return response;
-    } catch (error) {
-      throw new NCBIApiError('Invalid GEO dataset response format');
+    if (!data.esearchresult?.idlist?.length) {
+      return [];
     }
+
+    // Get details for each dataset
+    const idList = data.esearchresult.idlist;
+    const summaryUrl = `${this.baseUrl}/esummary.fcgi?db=gds&id=${idList.join(',')}&retmode=json&api_key=${this.apiKey}`;
+    const summaryResponse = await this.fetchWithRetry(summaryUrl);
+    const summaryData = await summaryResponse.json();
+
+    return Object.values(summaryData.result || {})
+      .filter((result): result is { accession: string; title: string } => 
+        typeof result === 'object' && 
+        result !== null && 
+        'accession' in result && 
+        'title' in result
+      )
+      .map(result => ({
+        accession: result.accession,
+        title: result.title
+      }));
   }
 
-  async getProteinInfo(proteinId: string): Promise<NCBIResponse<Protein>> {
-    const url = new URL(`${this.baseUrl}/protein/${proteinId}`);
-    url.searchParams.append('format', 'json');
+  async getGeoDataset(accession: string): Promise<GEODataset> {
+    // First get the dataset metadata
+    const searchUrl = `${this.baseUrl}/esearch.fcgi?db=gds&term=${accession}[Accession]&retmode=json&api_key=${this.apiKey}`;
+    const searchResponse = await this.fetchWithRetry(searchUrl);
+    const searchData = await searchResponse.json();
 
-    const response = await this.fetchWithRetry<Protein>(url.toString());
-    try {
-      ProteinSchema.parse(response.data);
-      return response;
-    } catch (error) {
-      throw new NCBIApiError('Invalid protein info response format');
+    const geoId = searchData.esearchresult?.idlist?.[0];
+    if (!geoId) {
+      throw new Error(`Dataset not found: ${accession}`);
     }
-  }
 
-  async runBlastSearch(
-    sequence: string,
-    options: {
-      database?: string;
-      evalue?: number;
-      max_hits?: number;
-    } = {}
-  ): Promise<NCBIResponse<BlastResult>> {
-    const url = new URL(`${this.baseUrl}/blast/blastp`);
-    
-    const response = await this.fetchWithRetry<BlastResult>(
-      url.toString(),
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          sequence,
-          database: options.database ?? 'nr',
-          evalue: options.evalue ?? 1e-5,
-          max_hits: options.max_hits ?? 100,
-        }),
+    // Get detailed dataset information
+    const summaryUrl = `${this.baseUrl}/esummary.fcgi?db=gds&id=${geoId}&retmode=json&api_key=${this.apiKey}`;
+    const summaryResponse = await this.fetchWithRetry(summaryUrl);
+    const summaryData = await summaryResponse.json();
+
+    const dataset = summaryData.result?.[geoId];
+    if (!dataset) {
+      throw new Error('Dataset details not found');
+    }
+
+    // Get the actual expression data
+    const dataUrl = `https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=${accession}&targ=self&form=text&view=quick`;
+    const dataResponse = await this.fetchWithRetry(dataUrl);
+    const dataText = await dataResponse.text();
+
+    // Parse the tab-delimited data
+    const lines = dataText.split('\n');
+    const samples = dataset.samples.map(sample => ({
+      id: sample.accession,
+      accession: sample.accession,
+      title: sample.title,
+      value: 0, // Will be updated with real data
+      condition: sample.title
+    }));
+
+    // Find and parse expression values
+    let currentSample: GEOSample | null = null;
+    for (const line of lines) {
+      if (line.startsWith('!Sample_title')) {
+        const title = line.split('=')[1]?.trim();
+        currentSample = samples.find(s => s.title === title) || null;
+      } else if (line.startsWith('!Sample_value') && currentSample) {
+        const value = parseFloat(line.split('=')[1]);
+        if (!isNaN(value)) {
+          currentSample.value = value;
+        }
       }
-    );
-
-    try {
-      BlastResultSchema.parse(response.data);
-      return response;
-    } catch (error) {
-      throw new NCBIApiError('Invalid BLAST response format');
     }
+
+    // Normalize values
+    const values = samples.map(s => s.value);
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const range = max - min;
+
+    const normalizedSamples = samples.map(sample => ({
+      ...sample,
+      value: range === 0 ? 0 : ((sample.value - min) / range) * 100
+    }));
+
+    const result = {
+      dataset_id: accession,
+      gene_id: dataset.title,
+      samples: normalizedSamples
+    };
+
+    // Validate the result
+    return GEODatasetSchema.parse(result);
   }
 
-  async getExpressionData(
-    geneId: string,
-    datasetId: string
-  ): Promise<NCBIResponse<ExpressionData>> {
-    const url = new URL(`${this.baseUrl}/geo/profiles`);
-    url.searchParams.append('gene', geneId);
-    url.searchParams.append('dataset', datasetId);
-    url.searchParams.append('format', 'json');
-
-    const response = await this.fetchWithRetry<ExpressionData>(url.toString());
-    try {
-      ExpressionDataSchema.parse(response.data);
-      return response;
-    } catch (error) {
-      throw new NCBIApiError('Invalid expression data response format');
-    }
+  async downloadGeoDataset(accession: string): Promise<Blob> {
+    const url = `https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=${accession}&targ=self&form=text&view=full`;
+    const response = await this.fetchWithRetry(url);
+    return response.blob();
   }
 }
 

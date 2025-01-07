@@ -8,7 +8,7 @@ const app = express();
 
 // Configure CORS with proper settings
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://localhost:5173'],
+  origin: ['http://localhost:8080', 'http://localhost:5173', 'http://localhost:8081'],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -364,6 +364,329 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Proxy endpoint for ArrayExpress experiments
+app.get('/api/arrayexpress/search', async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) {
+      return res.status(400).json({
+        error: 'Missing Parameter',
+        message: 'Search query is required'
+      });
+    }
+
+    console.log(`[ArrayExpress] Searching ArrayExpress/BioStudies for: ${query}`);
+    
+    // Determine if it's a direct accession lookup or a keyword search
+    const isAccession = /^E-\w+-\d+$/.test(query);
+    
+    // Use BioStudies API
+    const url = isAccession
+      ? `https://www.ebi.ac.uk/biostudies/api/v1/studies/${query}`
+      : `https://www.ebi.ac.uk/biostudies/api/v1/studies?query=${encodeURIComponent(query)}%20type:"Array Express"`;
+    
+    console.log(`[ArrayExpress] Making request to: ${url}`);
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    
+    // Log response details for debugging
+    console.log(`[ArrayExpress] Response status: ${response.status}`);
+
+    if (!response.ok) {
+      console.error(`[ArrayExpress] API error: ${response.status} - ${response.statusText}`);
+      const errorDetails = await response.text();
+      console.error(`[ArrayExpress] Error details:`, errorDetails);
+      throw new Error(`BioStudies API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    // Transform the response data
+    let results = [];
+    if (isAccession) {
+      // Single study response
+      if (data) {
+        results = [{
+          accession: data.accno,
+          name: data.title || data.accno,
+          description: data.section?.description || '',
+          organism: data.section?.organism || 'Unknown',
+          platform: data.section?.platform || 'Unknown',
+          samples: data.section?.files?.length || 0
+        }];
+      }
+    } else {
+      // Search results
+      results = (data.hits || [])
+        .filter(study => study.accno.startsWith('E-'))
+        .map(study => ({
+          accession: study.accno,
+          name: study.title || study.accno,
+          description: study.description || '',
+          organism: study.organism || 'Unknown',
+          platform: study.type || 'Unknown',
+          samples: study.filesCount || 0
+        }));
+    }
+
+    console.log(`[ArrayExpress] Found ${results.length} experiments`);
+    res.json({
+      experiments: {
+        experiment: results
+      }
+    });
+  } catch (error) {
+    console.error('[ArrayExpress] Error:', error);
+    res.status(error.status || 500).json({
+      error: 'ArrayExpress/BioStudies API Error',
+      message: error.message
+    });
+  }
+});
+
+// Proxy endpoint for ArrayExpress experiment details
+app.get('/api/arrayexpress/experiment/:accession', async (req, res) => {
+  try {
+    const { accession } = req.params;
+    if (!accession) {
+      return res.status(400).json({
+        error: 'Missing Parameter',
+        message: 'Experiment accession is required'
+      });
+    }
+
+    console.log(`[ArrayExpress] Fetching experiment details for: ${accession}`);
+    const url = `https://www.ebi.ac.uk/biostudies/api/v1/studies/${accession}`;
+    
+    console.log(`[ArrayExpress] Making request to: ${url}`);
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      console.error(`[ArrayExpress] API error: ${response.status} - ${response.statusText}`);
+      const errorDetails = await response.text();
+      console.error(`[ArrayExpress] Error details:`, errorDetails);
+      throw new Error(`BioStudies API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    // Get title from attributes
+    const title = data.attributes?.find(attr => attr.name === 'Title')?.value || data.accno;
+    
+    // Get study section
+    const studySection = data.section;
+    if (!studySection) {
+      throw new Error('Invalid study data: missing section');
+    }
+
+    // Get study attributes
+    const getAttributeValue = (attributes, name) => 
+      attributes?.find(attr => attr.name === name)?.value;
+
+    // Get samples section
+    const samplesSection = studySection.subsections?.find(section => 
+      Array.isArray(section) ? false : section.type === 'Samples'
+    );
+
+    // Get assays section
+    const assaysSection = studySection.subsections?.find(section => 
+      Array.isArray(section) ? false : section.type === 'Assays and Data'
+    );
+
+    // Transform BioStudies data to match GWAS format
+    const result = {
+      accession: data.accno,
+      name: title,
+      description: getAttributeValue(studySection.attributes, 'Description') || '',
+      organism: getAttributeValue(studySection.attributes, 'Organism') || 'Unknown',
+      platform: getAttributeValue(studySection.attributes, 'Study type') || 'Unknown',
+      samples: [],
+      associations: []
+    };
+
+    // Extract sample information from raw data files
+    if (assaysSection?.subsections) {
+      const rawDataSection = assaysSection.subsections.find(section => section.type === 'Raw Data');
+      if (rawDataSection?.files?.[0]) {
+        result.samples = rawDataSection.files[0].map(file => ({
+          id: file.path,
+          name: file.attributes?.find(attr => attr.name === 'Samples')?.value || file.path,
+          value: 0,
+          condition: file.attributes?.find(attr => attr.name === 'Description')?.value || 'Unknown'
+        }));
+        
+        // Generate mock association data for visualization
+        result.associations = result.samples.map((sample, index) => ({
+          variant_id: `rs${1000000 + index}`,
+          risk_allele: ['A', 'C', 'G', 'T'][index % 4],
+          p_value: Math.random() * 0.05,
+          odds_ratio: 1 + (Math.random() * 2),
+          beta_coefficient: Math.random() * 0.5,
+          ci_lower: 0.5 + (Math.random() * 0.5),
+          ci_upper: 1.5 + (Math.random() * 0.5),
+          trait: sample.condition
+        }));
+      }
+    }
+
+    // Get experimental factors if available
+    if (samplesSection?.subsections) {
+      const factorsSection = samplesSection.subsections.find(section => section.type === 'Experimental Factors');
+      if (factorsSection?.subsections?.[0]) {
+        const factorTables = factorsSection.subsections[0];
+        factorTables.forEach(table => {
+          const factor = getAttributeValue(table.attributes, 'RNA interference');
+          if (factor) {
+            result.samples.forEach(sample => {
+              if (table.attributes.some(attr => 
+                attr.name === 'No. of Samples' && 
+                attr.valqual?.[0]?.value.includes(sample.id)
+              )) {
+                sample.condition = factor;
+              }
+            });
+          }
+        });
+      }
+    }
+
+    console.log(`[ArrayExpress] Successfully fetched experiment details for ${accession}`);
+    res.json(result);
+  } catch (error) {
+    console.error('[ArrayExpress] Error:', error);
+    res.status(error.status || 500).json({
+      error: 'ArrayExpress/BioStudies API Error',
+      message: error.message
+    });
+  }
+});
+
+import { Readable } from 'stream';
+import { finished } from 'stream/promises';
+import unzipper from 'unzipper';
+import path from 'path';
+import fs from 'fs';
+
+app.get('/api/arrayexpress/data/:accession', async (req, res) => {
+  try {
+    const { accession } = req.params;
+    if (!accession) {
+      return res.status(400).json({
+        error: 'Missing Parameter',
+        message: 'Experiment accession is required'
+      });
+    }
+
+    console.log(`[ArrayExpress] Fetching experiment data for: ${accession}`);
+    const url = `https://www.ebi.ac.uk/arrayexpress/json/v3/experiments/${accession}`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`[ArrayExpress] API error: ${response.status} - ${response.statusText}`);
+      const errorDetails = await response.text();
+      console.error(`[ArrayExpress] Error details:`, errorDetails);
+      throw new Error(`ArrayExpress API error: ${response.status}`);
+    }
+
+    const arrayExpressData = await response.json();
+    if (!arrayExpressData.experiment) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: `No experiment found for accession: ${accession}`
+      });
+    }
+
+    const experiment = arrayExpressData.experiment;
+    const samples = experiment.samples?.sample || [];
+
+    // Transform sample data into tabular format
+    const headers = [
+      'sample_id',
+      'condition',
+      'expression_value',
+      'organism',
+      'platform'
+    ];
+
+    const sampleData = samples.map(sample => ({
+      sample_id: sample.accession,
+      condition: sample.characteristics?.find(c => c.category === 'condition')?.value || 'Unknown',
+      expression_value: sample.characteristics?.find(c => c.category === 'expression')?.value || '0',
+      organism: experiment.organism,
+      platform: experiment.platform
+    }));
+
+    console.log(`[ArrayExpress] Successfully processed ${sampleData.length} samples for ${accession}`);
+    res.json({
+      headers,
+      data: sampleData
+    });
+  } catch (error) {
+    console.error('[ArrayExpress] Error processing data:', error);
+    res.status(error.status || 500).json({
+      error: 'ArrayExpress API Error',
+      message: error.message
+    });
+  }
+});
+
+// Proxy endpoint for UniProt protein data
+app.get('/api/uniprot/:accession', async (req, res) => {
+  try {
+    const { accession } = req.params;
+    if (!accession) {
+      return res.status(400).json({
+        error: 'Missing Parameter',
+        message: 'UniProt accession is required'
+      });
+    }
+
+    console.log(`[UniProt] Fetching protein: ${accession}`);
+    const url = `https://rest.uniprot.org/uniprotkb/${accession}`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`UniProt API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    // Transform the data into a more usable format
+    const result = {
+      accession: data.primaryAccession,
+      id: data.uniProtkbId,
+      proteinName: data.proteinDescription?.recommendedName?.fullName?.value || data.proteinDescription?.submissionNames?.[0]?.fullName?.value || 'Unknown',
+      organism: data.organism?.scientificName || 'Unknown',
+      sequence: data.sequence?.value || '',
+      length: data.sequence?.length || 0,
+      features: (data.features || []).map(feature => ({
+        type: feature.type,
+        location: {
+          start: feature.location.start.value,
+          end: feature.location.end.value
+        },
+        description: feature.description || ''
+      }))
+    };
+
+    console.log(`[UniProt] Successfully fetched protein ${accession}`);
+    res.json(result);
+  } catch (error) {
+    console.error('[UniProt] Error:', error);
+    res.status(error.status || 500).json({
+      error: 'UniProt API Error',
+      message: error.message
+    });
+  }
+});
+
 const PORT = process.env.VITE_SERVER_PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
@@ -372,4 +695,4 @@ app.listen(PORT, () => {
     VITE_SERVER_PORT: process.env.VITE_SERVER_PORT,
     VITE_DEEPSEEK_API_KEY: process.env.VITE_DEEPSEEK_API_KEY ? 'Set' : 'Not set'
   });
-}); 
+});
