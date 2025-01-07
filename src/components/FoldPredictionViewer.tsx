@@ -16,8 +16,8 @@ interface FoldPredictionViewerProps {
 
 export const FoldPredictionViewer: React.FC<FoldPredictionViewerProps> = ({
   analysis,
-  width = 800,
-  height = 200,
+  width = 1200,
+  height = 600,
   colors = {
     confidence: ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15'],
     background: '#ffffff',
@@ -42,7 +42,7 @@ export const FoldPredictionViewer: React.FC<FoldPredictionViewerProps> = ({
       .attr('transform', `translate(${margin.left},${margin.top})`);
 
     // Find the sequence length from fold data
-    const maxEnd = Math.max(...analysis.structure.folds.map(f => f.end));
+    const maxEnd = Math.max(...analysis.structure.folds.map(f => Number(f.end)));
 
     // Create scales
     const xScale = d3.scaleLinear()
@@ -172,4 +172,4 @@ export const FoldPredictionViewer: React.FC<FoldPredictionViewerProps> = ({
   );
 };
 
-export default FoldPredictionViewer; 
+export default FoldPredictionViewer;

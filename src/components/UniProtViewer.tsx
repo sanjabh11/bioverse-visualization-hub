@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { toast } from 'sonner';
+import { SequenceViewer } from './SequenceViewer';
 
 interface UniProtEntry {
   accession: string;
@@ -19,6 +20,13 @@ interface UniProtEntry {
     description: string;
   }>;
 }
+
+const CrossReferences: React.FC<{
+  uniprotId: string;
+  pdbIds: string[];
+}> = ({ uniprotId, pdbIds }) => {
+  // Implementation needed
+};
 
 export const UniProtViewer: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -70,30 +78,40 @@ export const UniProtViewer: React.FC = () => {
       </div>
 
       {protein && (
-        <div className="bg-white rounded-lg p-6 shadow-md">
-          <h3 className="text-xl font-semibold mb-4">{protein.proteinName}</h3>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="font-medium">Accession</p>
-                <p>{protein.accession}</p>
-              </div>
-              <div>
-                <p className="font-medium">Entry Name</p>
-                <p>{protein.id}</p>
-              </div>
-              <div>
-                <p className="font-medium">Organism</p>
-                <p>{protein.organism}</p>
-              </div>
-              <div>
-                <p className="font-medium">Length</p>
-                <p>{protein.length} amino acids</p>
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg p-6 shadow-md">
+            <h3 className="text-xl font-semibold mb-4">{protein.proteinName}</h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="font-medium">Accession</p>
+                  <p>{protein.accession}</p>
+                </div>
+                <div>
+                  <p className="font-medium">Entry Name</p>
+                  <p>{protein.id}</p>
+                </div>
+                <div>
+                  <p className="font-medium">Organism</p>
+                  <p>{protein.organism}</p>
+                </div>
+                <div>
+                  <p className="font-medium">Length</p>
+                  <p>{protein.length} amino acids</p>
+                </div>
               </div>
             </div>
+          </div>
 
+          <SequenceViewer
+            sequence={protein.sequence}
+            features={protein.features}
+            accession={protein.accession}
+          />
+
+          <div className="bg-white rounded-lg p-6 shadow-md">
             <div className="mt-4">
-              <p className="font-medium mb-2">Sequence</p>
+              <p className="font-medium mb-2">Raw Sequence</p>
               <div className="font-mono text-xs bg-gray-50 p-4 rounded overflow-x-auto">
                 {protein.sequence.match(/.{1,60}/g)?.map((line, i) => (
                   <div key={i}>{line}</div>

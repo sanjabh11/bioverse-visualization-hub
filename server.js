@@ -687,6 +687,17 @@ app.get('/api/uniprot/:accession', async (req, res) => {
   }
 });
 
+// Add these endpoints
+app.get('/api/structure/download/:type/:id', async (req, res) => {
+  const { type, id } = req.params;
+  // Implementation for PDB/mmCIF downloads
+});
+
+app.get('/api/structure/similarity/:id', async (req, res) => {
+  const { id } = req.params;
+  // Implementation for structure similarity search
+});
+
 const PORT = process.env.VITE_SERVER_PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Proxy server running on port ${PORT}`);
