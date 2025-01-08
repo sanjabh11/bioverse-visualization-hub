@@ -63,8 +63,10 @@ export const ProteinViewer = ({ structure, isLoading }: ProteinViewerProps) => {
       if (!pluginRef.current || !structure) return;
 
       try {
-        await pluginRef.current.clear();
+        const plugin = pluginRef.current;
+        await plugin.clear();
 
+        // Remove any existing error messages
         if (containerRef.current) {
           const existingText = containerRef.current.querySelector('.text-display');
           if (existingText) {
@@ -72,169 +74,81 @@ export const ProteinViewer = ({ structure, isLoading }: ProteinViewerProps) => {
           }
         }
 
-        try {
-          const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
-          
-          // Extract structure identifiers
-          console.log('Structure data:', structure);
-          
-          // Try to extract AlphaFold ID first
-          let alphafoldId = null;
-          let pdbId = null;
-          
-          // Try different patterns for AlphaFold URL
-          const alphafoldPatterns = [
-            /alphafold\.ebi\.ac\.uk\/files\/AF-(.*?)-F1-model_v4\.pdb/,
-            /alphafold\.ebi\.ac\.uk\/files\/(.*?)\.pdb/,
-            /AF-(.*?)-F1-model_v4\.pdb/
-          ];
-          
-          for (const pattern of alphafoldPatterns) {
-            const match = structure.match(pattern);
-            if (match) {
-              alphafoldId = match[1];
-              break;
+        // Extract PDB ID if present
+        const pdbMatch = structure.match(/PDB ID: (\w+)/);
+        if (pdbMatch) {
+          const pdbId = pdbMatch[1];
+          try {
+            // Fetch PDB data
+            const response = await fetch(`https://files.rcsb.org/download/${pdbId}.pdb`);
+            if (!response.ok) {
+              throw new Error(`Failed to fetch PDB structure: ${response.status}`);
             }
-          }
-          
-          // Extract PDB ID
-          const pdbMatch = structure.match(/PDB ID: (\w+)/);
-          if (pdbMatch) {
-            pdbId = pdbMatch[1];
-          }
-          
-          console.log('Extracted IDs:', { alphafoldId, pdbId });
-          
-          // Try to load structure
-          const plugin = pluginRef.current;
-          let structureData = null;
-          let errorMessage = '';
-          
-          // First try AlphaFold if we have an ID
-          if (alphafoldId) {
-            const url = `${SERVER_URL}/api/structure/alphafold/${alphafoldId}`;
-            console.log('Attempting to load AlphaFold structure from:', url);
+            const pdbData = await response.text();
             
-            try {
-              const response = await fetch(url);
-              if (response.ok) {
-                const text = await response.text();
-                if (text.includes('ATOM') || text.includes('HETATM')) {
-                  structureData = text;
-                  console.log('Successfully loaded AlphaFold structure');
-                } else {
-                  console.error('Invalid AlphaFold data received');
-                  errorMessage = 'Invalid AlphaFold data received';
-                }
-              } else {
-                console.error('Failed to fetch AlphaFold structure:', response.status);
-                errorMessage = `Failed to fetch AlphaFold structure: ${response.status}`;
-              }
-            } catch (error) {
-              console.error('Error loading AlphaFold structure:', error);
-              errorMessage = error.message;
+            // Load the fetched data
+            const data = await plugin.builders.data.rawData({ data: pdbData });
+            const trajectory = await plugin.builders.structure.parseTrajectory(data, 'pdb');
+            const model = await plugin.builders.structure.createModel(trajectory);
+            const modelStructure = await plugin.builders.structure.createStructure(model);
+
+            await plugin.builders.structure.representation.addRepresentation(modelStructure, {
+              type: 'cartoon',
+              color: 'chain-id'
+            });
+
+            if (plugin.canvas3d) {
+              await plugin.canvas3d.commit();
             }
+            return;
+          } catch (pdbError) {
+            console.error('Failed to load from PDB:', pdbError);
+            throw pdbError;
           }
-          
-          // If AlphaFold failed and we have a PDB ID, try that
-          if (!structureData && pdbId) {
-            const url = `${SERVER_URL}/api/structure/pdb/${pdbId}`;
-            console.log('Attempting to load PDB structure from:', url);
-            
-            try {
-              const response = await fetch(url);
-              if (response.ok) {
-                const text = await response.text();
-                if (text.includes('ATOM') || text.includes('HETATM')) {
-                  structureData = text;
-                  console.log('Successfully loaded PDB structure');
-                } else {
-                  console.error('Invalid PDB data received');
-                  errorMessage = 'Invalid PDB data received';
-                }
-              } else {
-                console.error('Failed to fetch PDB structure:', response.status);
-                errorMessage = `Failed to fetch PDB structure: ${response.status}`;
-              }
-            } catch (error) {
-              console.error('Error loading PDB structure:', error);
-              errorMessage = error.message;
-            }
-          }
-          
-          // If we have structure data, try to load it
-          if (structureData) {
-            try {
-              // Load structure data directly
-              const data = await plugin.builders.data.rawData({ data: structureData });
-              const trajectory = await plugin.builders.structure.parseTrajectory(data, 'pdb');
-              const model = await plugin.builders.structure.createModel(trajectory);
-              const structure = await plugin.builders.structure.createStructure(model);
-              
-              // Add representation
-              await plugin.builders.structure.representation.addRepresentation(structure, {
-                type: 'cartoon',
-                color: 'chain-id'
-              });
-              
-              return;
-            } catch (error) {
-              console.error('Error loading structure into viewer:', error);
-              errorMessage = `Error loading structure into viewer: ${error.message}`;
-            }
-          }
-          
-          // If we get here, show error or text prediction
-          const element = document.createElement('div');
-          element.className = 'text-display';
-          element.style.padding = '20px';
-          element.style.backgroundColor = '#fff';
-          element.style.maxHeight = '100%';
-          element.style.overflow = 'auto';
-          element.style.position = 'absolute';
-          element.style.inset = '0';
-          
-          if (errorMessage) {
-            element.style.color = '#dc2626';
-            element.innerHTML = `<div class="flex flex-col gap-4">
-              <p class="text-red-600 font-semibold">Failed to load structure:</p>
-              <p>${errorMessage}</p>
-              <pre class="mt-4 text-sm text-gray-600 whitespace-pre-wrap">${structure}</pre>
-            </div>`;
-          } else {
-            element.style.color = '#000';
-            element.innerHTML = `<pre>${structure}</pre>`;
-          }
-          
-          containerRef.current?.appendChild(element);
-        } catch (error) {
-          console.error('Failed to load structure:', error);
-          
-          // Show error message to user
-          const element = document.createElement('div');
-          element.className = 'text-display';
-          element.style.padding = '20px';
-          element.style.color = '#dc2626';
-          element.style.backgroundColor = '#fff';
-          element.style.maxHeight = '100%';
-          element.style.overflow = 'auto';
-          element.style.position = 'absolute';
-          element.style.inset = '0';
-          element.innerHTML = `<div class="flex flex-col gap-4">
-            <p class="text-red-600 font-semibold">Failed to load structure:</p>
-            <p>${error.message}</p>
-            <pre class="mt-4 text-sm text-gray-600 whitespace-pre-wrap">${structure}</pre>
-          </div>`;
-          
-          containerRef.current?.appendChild(element);
         }
+
+        // If no PDB ID, try loading as raw data
+        const data = await plugin.builders.data.rawData({ data: structure });
+        const trajectory = await plugin.builders.structure.parseTrajectory(data, 'pdb');
+        const model = await plugin.builders.structure.createModel(trajectory);
+        const modelStructure = await plugin.builders.structure.createStructure(model);
+
+        await plugin.builders.structure.representation.addRepresentation(modelStructure, {
+          type: 'cartoon',
+          color: 'chain-id'
+        });
+
+        if (plugin.canvas3d) {
+          await plugin.canvas3d.commit();
+        }
+
       } catch (error) {
         console.error('Failed to load structure:', error);
+        showError(error.message);
       }
     };
 
     loadStructure();
   }, [structure]);
+
+  const showError = (message: string) => {
+    if (!containerRef.current) return;
+    const element = document.createElement('div');
+    element.className = 'text-display';
+    element.style.padding = '20px';
+    element.style.color = '#dc2626';
+    element.style.backgroundColor = '#fff';
+    element.style.maxHeight = '100%';
+    element.style.overflow = 'auto';
+    element.style.position = 'absolute';
+    element.style.inset = '0';
+    element.innerHTML = `<div class="flex flex-col gap-4">
+      <p class="text-red-600 font-semibold">Failed to load structure:</p>
+      <p>${message}</p>
+      <pre class="mt-4 text-sm text-gray-600 whitespace-pre-wrap">${structure}</pre>
+    </div>`;
+    containerRef.current.appendChild(element);
+  };
 
   return (
     <div className="relative w-full h-[400px] rounded-lg overflow-hidden bg-gray-100">
