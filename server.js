@@ -65,7 +65,7 @@ app.post('/api/protein/predict', async (req, res) => {
       messages: [
         {
           role: "user",
-          content: `Analyze the following protein sequence and provide structure prediction with confidence scores (pLDDT and PAE): ${req.body.sequence}`
+          content: `Predict the structure for the following protein sequence: ${req.body.sequence}`
         }
       ],
       temperature: 0.7,
@@ -112,41 +112,13 @@ app.post('/api/protein/predict', async (req, res) => {
     
     const data = await response.json();
     
-    // Generate confidence scores
-    const sequenceLength = req.body.sequence.length;
+    // Add PDB ID to the response if available
+    if (data.choices?.[0]?.message) {
+      data.choices[0].message.content += additionalInfo;
+    }
     
-    // Generate pLDDT scores (between 50 and 100)
-    const plddt = Array.from({ length: sequenceLength }, () => {
-      // Higher probability of higher scores
-      const rand = Math.random();
-      if (rand > 0.8) return 90 + Math.random() * 10; // Very high (90-100)
-      if (rand > 0.5) return 70 + Math.random() * 20; // Confident (70-90)
-      if (rand > 0.2) return 50 + Math.random() * 20; // Low (50-70)
-      return 30 + Math.random() * 20; // Very low (30-50)
-    });
-
-    // Generate PAE matrix
-    const pae = Array.from({ length: sequenceLength }, (_, i) => 
-      Array.from({ length: sequenceLength }, (_, j) => {
-        // Lower error for nearby residues
-        const distance = Math.abs(i - j);
-        const baseError = Math.min(distance * 0.1, 5);
-        return baseError + Math.random() * 5;
-      })
-    );
-
-    // Add confidence scores and PDB ID to the response
-    const response_data = {
-      ...data,
-      confidence_scores: {
-        plddt,
-        pae
-      },
-      pdb_id: pdbId
-    };
-    
-    console.log('Sending response with confidence scores');
-    res.json(response_data);
+    console.log('DeepSeek API Response:', JSON.stringify(data, null, 2));
+    res.json(data);
   } catch (error) {
     console.error('Proxy Server Error:', error);
     res.status(500).json({ 

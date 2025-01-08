@@ -3,7 +3,6 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { toast } from 'sonner';
 import { SequenceViewer } from './SequenceViewer';
-import { ConfidenceScores } from './ConfidenceScores';
 
 interface UniProtEntry {
   accession: string;
@@ -20,17 +19,19 @@ interface UniProtEntry {
     };
     description: string;
   }>;
-  confidence_scores?: {
-    plddt: number[];
-    pae: number[][];
-  };
 }
+
+const CrossReferences: React.FC<{
+  uniprotId: string;
+  pdbIds: string[];
+}> = ({ uniprotId, pdbIds }) => {
+  // Implementation needed
+};
 
 export const UniProtViewer: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [accession, setAccession] = useState('');
   const [protein, setProtein] = useState<UniProtEntry | null>(null);
-  const [confidenceScores, setConfidenceScores] = useState<{ plddt: number[]; pae: number[][] } | null>(null);
 
   const fetchProtein = async () => {
     if (!accession) {
@@ -41,40 +42,14 @@ export const UniProtViewer: React.FC = () => {
     setIsLoading(true);
     try {
       const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
-      
-      // Fetch protein data
       const response = await fetch(`${SERVER_URL}/api/uniprot/${accession}`);
+      
       if (!response.ok) {
         throw new Error(`Failed to fetch protein: ${response.status}`);
       }
+
       const data = await response.json();
-
-      // Fetch structure prediction and confidence scores
-      const predictionResponse = await fetch(`${SERVER_URL}/api/protein/predict`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          sequence: data.sequence
-        })
-      });
-
-      if (!predictionResponse.ok) {
-        throw new Error(`Failed to fetch prediction: ${predictionResponse.status}`);
-      }
-
-      const predictionData = await predictionResponse.json();
-      
-      // Set protein data
       setProtein(data);
-      
-      // Set confidence scores separately
-      if (predictionData.confidence_scores) {
-        console.log('Setting confidence scores:', predictionData.confidence_scores);
-        setConfidenceScores(predictionData.confidence_scores);
-      }
-
       toast.success('Protein data loaded successfully');
     } catch (error) {
       console.error('Error fetching protein:', error);
@@ -133,13 +108,6 @@ export const UniProtViewer: React.FC = () => {
             features={protein.features}
             accession={protein.accession}
           />
-
-          {confidenceScores && (
-            <ConfidenceScores
-              plddt={confidenceScores.plddt}
-              pae={confidenceScores.pae}
-            />
-          )}
 
           <div className="bg-white rounded-lg p-6 shadow-md">
             <div className="mt-4">
