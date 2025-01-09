@@ -26,6 +26,12 @@ const CrossReferences: React.FC<{
   pdbIds: string[];
 }> = ({ uniprotId, pdbIds }) => {
   // Implementation needed
+  return (
+    <div>
+      {/* Placeholder for cross-references */}
+      Cross-references will be displayed here.
+    </div>
+  );
 };
 
 export const UniProtViewer: React.FC = () => {
@@ -103,11 +109,13 @@ export const UniProtViewer: React.FC = () => {
             </div>
           </div>
 
-          <SequenceViewer
-            sequence={protein.sequence}
-            features={protein.features}
-            accession={protein.accession}
-          />
+          {protein && (
+            <SequenceViewer
+              sequence={protein.sequence}
+              features={protein.features}
+              accession={protein.accession}
+            />
+          )}
 
           <div className="bg-white rounded-lg p-6 shadow-md">
             <div className="mt-4">
@@ -142,4 +150,4 @@ export const UniProtViewer: React.FC = () => {
       )}
     </div>
   );
-}; 
+};

@@ -1,9 +1,14 @@
-import React, { useEffect, useRef } from 'react';
-import { Card } from './ui/card';
-import ProtvistaManager from 'protvista-manager';
-import ProtvistaSequence from 'protvista-sequence';
-import ProtvistaNavigation from 'protvista-navigation';
-import ProtvistaTrack from 'protvista-track';
+import React, { useEffect } from 'react';
+import { Card } from '../components/ui/card';
+
+// Register ProtVista components as custom elements
+if (typeof window !== 'undefined') {
+  customElements.define('protvista-sequence', class extends HTMLElement {});
+  customElements.define('protvista-manager', class extends HTMLElement {});
+  customElements.define('protvista-navigation', class extends HTMLElement {});
+  customElements.define('protvista-track', class extends HTMLElement {});
+  customElements.define('protvista-zoomable', class extends HTMLElement {});
+}
 
 interface SequenceViewerProps {
   sequence: string;
@@ -18,62 +23,72 @@ interface SequenceViewerProps {
   accession: string;
 }
 
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      'protvista-sequence': any;
+      'protvista-manager': any;
+      'protvista-navigation': any;
+      'protvista-track': any;
+      'protvista-zoomable': any;
+    }
+  }
+}
+
 export const SequenceViewer: React.FC<SequenceViewerProps> = ({
   sequence,
   features,
   accession
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
-    if (!containerRef.current || !sequence) return;
-
-    // Format features for ProtVista
-    const formattedFeatures = features.map((feature, index) => ({
-      accession: `feature-${index}`,
-      type: feature.type,
-      category: feature.type,
-      description: feature.description,
-      start: feature.location.start,
-      end: feature.location.end,
-      color: '#00a6d6'
-    }));
-
-    const manager = containerRef.current?.querySelector('protvista-manager');
-    if (manager) {
-      manager.setAttribute('attributes', JSON.stringify(formattedFeatures));
+    // Ensure Web Components are loaded
+    if (typeof window !== 'undefined' && window.customElements) {
+      // Wait for ProtVista components to be defined
+      customElements.whenDefined('protvista-sequence').then(() => {
+        // Components are ready
+      });
     }
-
-    const seqViewer = containerRef.current?.querySelector('protvista-sequence');
-    if (seqViewer) {
-      seqViewer.setAttribute('sequence', sequence);
-      seqViewer.setAttribute('length', sequence.length.toString());
-    }
-  }, [sequence, features, accession]);
+  }, []);
 
   return (
     <Card className="p-4">
       <div className="font-semibold mb-2">Sequence Visualization</div>
       <div 
-        ref={containerRef} 
-        className="w-full min-h-[200px] bg-gray-50 rounded"
+        className="w-full min-h-[300px] bg-gray-50 rounded"
         data-testid="sequence-viewer"
+        style={{ 
+          position: 'relative', 
+          overflow: 'hidden',
+          minWidth: '800px',
+          height: '300px'
+        }}
       >
-        <protvista-manager>
+        {typeof window !== 'undefined' && (
+          <protvista-manager>
           <protvista-navigation length={sequence.length} />
           <protvista-sequence 
-            length={sequence.length} 
+            sequence={sequence} 
             displaystart="1" 
             displayend={sequence.length.toString()}
+            height="50"
           />
           <protvista-track 
-            length={sequence.length} 
-            displaystart="1" 
+            length={sequence.length}
+            displaystart="1"
             displayend={sequence.length.toString()}
-            layout="non-overlapping" 
-            height="200"
+            layout="non-overlapping"
+            height="150"
+            features={JSON.stringify(features.map(f => ({
+              ...f,
+              start: f.location.start,
+              end: f.location.end,
+              color: '#FF0000',
+              typeCategory: 'miscellaneous'
+            })))}
           />
+          <protvista-zoomable />
         </protvista-manager>
+        )}
       </div>
     </Card>
   );
